@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>E.T.C.S.</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Courier New', Courier, monospace; background: #000; touch-action: none; }
+        canvas { display: block; }
+        #crt-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 100; background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.05), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.05)); background-size: 100% 3px, 3px 100%; }
+        #win-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: none; flex-direction: column; justify-content: center; align-items: center; z-index: 1000; text-align: center; padding: 20px; }
+        #game-over { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #f00; color: #000; font-size: 3rem; display: none; z-index: 200; text-align: center; flex-direction: column; justify-content: center; align-items: center; font-weight: bold; }
+        #intro-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: black; color: #0f0; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 1000; text-align: center; }
+        #joystick-zone { position: absolute; bottom: 40px; left: 40px; width: 150px; height: 150px; z-index: 110; }
+        .ctrl-btn { position: absolute; width: 70px; height: 70px; border-radius: 50%; background: rgba(0, 255, 0, 0.1); border: 1px solid rgba(0,255,0,0.3); color: rgba(0,255,0,0.6); z-index: 110; font-weight: bold; }
+        #run-btn { bottom: 140px; right: 40px; }
+        #jump-btn { bottom: 40px; right: 40px; }
+        #alert-msg { position: fixed; top: 20px; width: 100%; text-align: center; color: #f00; font-size: 0.8rem; z-index: 105; display: none; text-shadow: 2px 2px #000; }
+    </style>
+</head>
+<body>
+
+    <div id="crt-overlay"></div>
+    <div id="alert-msg">A CADA ERRO SEU EU FICO MAIS FORTE, sempre foi assim...</div>
+
+    <div id="intro-screen">
+        <p>"CADA ERRO TEM UM PREÇO, ESSA É A SUA CONTA!"</p>
+        <p style="font-size: 0.7rem; margin-top: 40px;">[ ACEITE O INEVITÁVEL ]</p>
+    </div>
+
+    <div id="win-screen"><h1 id="win-title"></h1><p id="win-desc"></p></div>
+    <div id="game-over">ELE TE ENCONTROU</div>
+    
+    <div id="joystick-zone"></div>
+    <button id="run-btn" class="ctrl-btn">RUN</button>
+    <button id="jump-btn" class="ctrl-btn">JUMP</button>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.9.0/nipplejs.min.js"></script>
+
+    <script>
+        const winVariations = [
+            { title: "VOCÊ SAIU?", desc: "Mas a sua sujeira ficou para trás.", color: "#fff" },
+            { title: "SISTEMA REINICIADO", desc: "A dor é a única constante.", color: "#0f0" },
+            { title: "UMA ALMA VAZIA", desc: "Você apenas mudou de cela.", color: "#f00" },
+            { title: "ILUSÃO DE ÓTICA", desc: "Você não anda nesse lugar.", color: "#f00" },
+            { title: "EU VOU VOLTAR", desc: "ASSIM QUE VOCÊ ACEITAR SEU ERRO, MAIS UMA VEZ...", color: "#f00" },
+            { title: "NÃO SEJA BURRO", desc: "VOCÊ FOI CRIADO PRA SENTIR DOR!", color: "#f00" }
+        ];
+
+        let gameActive = false, isGameOver = false, hasWon = false;
+        let audioCtx, noiseNode, filterNode, gainNode;
+        let monsterSpeed = 0.35; // Velocidade inicial
+
+        function startAudio() {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const bufferSize = 2 * audioCtx.sampleRate;
+            const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const output = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
+            noiseNode = audioCtx.createBufferSource();
+            noiseNode.buffer = buffer; noiseNode.loop = true;
+            gainNode = audioCtx.createGain(); gainNode.gain.value = 0.05;
+            filterNode = audioCtx.createBiquadFilter();
+            filterNode.type = "lowpass"; filterNode.frequency.value = 800;
+            noiseNode.connect(filterNode); filterNode.connect(gainNode); gainNode.connect(audioCtx.destination);
+            noiseNode.start();
+        }
+
+        function triggerWin() {
+            hasWon = true;
+            const variation = winVariations[Math.floor(Math.random() * winVariations.length)];
+            document.getElementById('win-title').innerText = variation.title;
+            document.getElementById('win-desc').innerText = variation.desc;
+            const ws = document.getElementById('win-screen');
+            ws.style.display = 'flex'; ws.style.color = variation.color;
+            setTimeout(() => location.reload(), 5000);
+        }
+
+        function playDeathScream() {
+            const osc = audioCtx.createOscillator();
+            const dGain = audioCtx.createGain();
+            osc.type = 'sine'; osc.frequency.setValueAtTime(3000, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(9000, audioCtx.currentTime + 1.5);
+            dGain.gain.setValueAtTime(0, audioCtx.currentTime);
+            dGain.gain.linearRampToValueAtTime(0.7, audioCtx.currentTime + 0.1);
+            osc.connect(dGain); dGain.connect(audioCtx.destination);
+            osc.start();
+        }
+
+        document.getElementById('intro-screen').addEventListener('touchstart', () => {
+            if(!gameActive) { document.getElementById('intro-screen').style.display = 'none'; gameActive = true; startAudio(); }
+        });
+
+        // --- CENA ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050a05);
+        scene.fog = new THREE.Fog(0x050a05, 1, 250);
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 1500);
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+        scene.add(new THREE.AmbientLight(0x00ff00, 0.1));
+
+        const pillars = [];
+        let exitIndex = Math.floor(Math.random() * 40); 
+        let exitPos = new THREE.Vector3();
+
+        for(let i=0; i<40; i++) {
+            const b = new THREE.Mesh(new THREE.BoxGeometry(10, 25, 10), new THREE.MeshLambertMaterial({color: 0x000000}));
+            const x = Math.random()*700-350; const z = Math.random()*700-350;
+            b.position.set(x, 12.5, z);
+            scene.add(b);
+            pillars.push({ mesh: b, isExit: (i === exitIndex), tested: false });
+            if(i === exitIndex) exitPos.set(x, 0, z);
+        }
+
+        const monster = new THREE.Mesh(new THREE.BoxGeometry(45, 250, 45), new THREE.MeshBasicMaterial({ color: 0x000000 }));
+        monster.position.set(250, 125, 250);
+        scene.add(monster);
+
+        const player = new THREE.Group(); scene.add(player); player.add(camera);
+        camera.position.y = 1.7;
+
+        let moveData = { x: 0, y: 0 }, lon = 0, lat = 0, lookTouchId = null, lastX = 0, lastY = 0;
+        let isRunning = false, jumping = false, vy = 0;
+
+        nipplejs.create({ zone: document.getElementById('joystick-zone'), mode: 'static', position: { left: '75px', bottom: '75px' } })
+        .on('move', (e, d) => { moveData = d.vector; })
+        .on('end', () => { moveData = { x: 0, y: 0 }; });
+
+        window.addEventListener('touchstart', (e) => {
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const t = e.changedTouches[i];
+                if (t.clientX > window.innerWidth / 2 && lookTouchId === null) {
+                    lookTouchId = t.identifier; lastX = t.clientX; lastY = t.clientY;
+                }
+            }
+        });
+        window.addEventListener('touchmove', (e) => {
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const t = e.changedTouches[i];
+                if (t.identifier === lookTouchId) {
+                    lon -= (t.clientX - lastX) * 0.4; lat -= (t.clientY - lastY) * 0.4;
+                    lat = Math.max(-85, Math.min(85, lat));
+                    lastX = t.clientX; lastY = t.clientY;
+                }
+            }
+        });
+        window.addEventListener('touchend', (e) => {
+            for (let i = 0; i < e.changedTouches.length; i++) { if (e.changedTouches[i].identifier === lookTouchId) lookTouchId = null; }
+        });
+
+        document.getElementById('run-btn').addEventListener('touchstart', (e) => { e.preventDefault(); isRunning = true; });
+        document.getElementById('run-btn').addEventListener('touchend', () => isRunning = false);
+        document.getElementById('jump-btn').addEventListener('touchstart', (e) => { e.preventDefault(); if(!jumping) { vy = 0.28; jumping = true; } });
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if(!gameActive || isGameOver || hasWon) return;
+
+            player.rotation.y = THREE.MathUtils.degToRad(lon);
+            camera.rotation.x = THREE.MathUtils.degToRad(lat);
+
+            let pSpeed = isRunning ? 0.75 : 0.35;
+            player.translateX(moveData.x * pSpeed);
+            player.translateZ(-moveData.y * pSpeed);
+
+            if(jumping) { player.position.y += vy; vy -= 0.012; if(player.position.y <= 0) { player.position.y = 0; jumping = false; } }
+
+            // Áudio do Portal
+            const distToExit = player.position.distanceTo(exitPos);
+            if(filterNode) {
+                let freq = THREE.MathUtils.mapLinear(distToExit, 0, 400, 6000, 600);
+                filterNode.frequency.value = Math.max(600, Math.min(6000, freq));
+            }
+
+            // --- LÓGICA DE TESTE DE PILARES ---
+            pillars.forEach(p => {
+                const d = p.mesh.position.distanceTo(new THREE.Vector3(player.position.x, 12.5, player.position.z));
+                if(d < 9) {
+                    if(p.isExit) {
+                        triggerWin();
+                    } else if (!p.tested) {
+                        // Errou o pilar: Monstro acelera
+                        p.tested = true;
+                        monsterSpeed += 0.08; // Aumento de velocidade
+                        
+                        // Feedback visual do erro
+                        const alert = document.getElementById('alert-msg');
+                        alert.style.display = 'block';
+                        setTimeout(() => alert.style.display = 'none', 1500);
+                        
+                        // O pilar "reage" ao erro ficando levemente cinza escuro
+                        p.mesh.material.color.setHex(0x111111);
+                    }
+                }
+            });
+
+            // Movimentação do Gigante
+            const distMon = monster.position.distanceTo(player.position);
+            const dir = new THREE.Vector3().subVectors(player.position, monster.position).normalize();
+            monster.position.addScaledVector(dir, monsterSpeed); 
+            monster.lookAt(player.position.x, 125, player.position.z);
+
+            if(distMon < 50) {
+                isGameOver = true; playDeathScream();
+                document.getElementById('game-over').style.display = 'flex';
+                setTimeout(() => location.reload(), 3000);
+            }
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
