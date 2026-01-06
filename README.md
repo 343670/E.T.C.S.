@@ -7,3 +7,6 @@ os sentidos de dor e incomodo potencializados.
 Ícaro foi uma delas!
 
 Você é o Ícaro.
+
+
+SIGA O BARULHO!
